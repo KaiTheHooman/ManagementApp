@@ -1,6 +1,7 @@
 import java.io.IOException;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
+import java.sql.ResultSet;
 import javax.servlet.ServletException;
 import javax.servlet.annotation.WebServlet;
 import javax.servlet.http.HttpServlet;
@@ -27,28 +28,58 @@ public class InventoryServlet extends HttpServlet {
 
             if ("add".equals(action)) {
                 String productName = request.getParameter("productName").trim();
-                String category = request.getParameter("category").trim();
-                int stock = Integer.parseInt(request.getParameter("stock"));
-                int threshold = Integer.parseInt(request.getParameter("threshold"));
+                // Always force category to UPPERCASE
+                String category = request.getParameter("category").trim().toUpperCase();
+                int addedStock = Math.max(0, Integer.parseInt(request.getParameter("stock")));
+                int threshold = Math.max(0, Integer.parseInt(request.getParameter("threshold")));
 
-                String sql = "INSERT INTO inventory (product_name, category, stock, low_threshold) VALUES (?, ?, ?, ?)";
-                try (PreparedStatement stmt = conn.prepareStatement(sql)) {
-                    stmt.setString(1, productName);
-                    stmt.setString(2, category);
-                    stmt.setInt(3, Math.max(0, stock));
-                    stmt.setInt(4, Math.max(0, threshold));
-                    stmt.executeUpdate();
+                // Check if the same product in the same category already exists (case-insensitive)
+                String checkSql = "SELECT id, stock FROM inventory WHERE LOWER(product_name) = LOWER(?) AND UPPER(category) = ?";
+                int existingId = -1;
+                int existingStock = 0;
+
+                try (PreparedStatement checkStmt = conn.prepareStatement(checkSql)) {
+                    checkStmt.setString(1, productName);
+                    checkStmt.setString(2, category);
+                    try (ResultSet rs = checkStmt.executeQuery()) {
+                        if (rs.next()) {
+                            existingId = rs.getInt("id");
+                            existingStock = rs.getInt("stock");
+                        }
+                    }
+                }
+
+                if (existingId != -1) {
+                    // Duplicate found: merge stocks together and update category/threshold
+                    String mergeSql = "UPDATE inventory SET stock = ?, low_threshold = ?, category = ? WHERE id = ?";
+                    try (PreparedStatement mergeStmt = conn.prepareStatement(mergeSql)) {
+                        mergeStmt.setInt(1, existingStock + addedStock);
+                        mergeStmt.setInt(2, threshold);
+                        mergeStmt.setString(3, category);
+                        mergeStmt.setInt(4, existingId);
+                        mergeStmt.executeUpdate();
+                    }
+                } else {
+                    // New item: insert normally
+                    String insertSql = "INSERT INTO inventory (product_name, category, stock, low_threshold) VALUES (?, ?, ?, ?)";
+                    try (PreparedStatement insertStmt = conn.prepareStatement(insertSql)) {
+                        insertStmt.setString(1, productName);
+                        insertStmt.setString(2, category);
+                        insertStmt.setInt(3, addedStock);
+                        insertStmt.setInt(4, threshold);
+                        insertStmt.executeUpdate();
+                    }
                 }
 
             } else if ("update".equals(action)) {
                 int id = Integer.parseInt(request.getParameter("id"));
-                int stock = Integer.parseInt(request.getParameter("stock"));
-                int threshold = Integer.parseInt(request.getParameter("threshold"));
+                int stock = Math.max(0, Integer.parseInt(request.getParameter("stock")));
+                int threshold = Math.max(0, Integer.parseInt(request.getParameter("threshold")));
 
                 String sql = "UPDATE inventory SET stock = ?, low_threshold = ? WHERE id = ?";
                 try (PreparedStatement stmt = conn.prepareStatement(sql)) {
-                    stmt.setInt(1, Math.max(0, stock));
-                    stmt.setInt(2, Math.max(0, threshold));
+                    stmt.setInt(1, stock);
+                    stmt.setInt(2, threshold);
                     stmt.setInt(3, id);
                     stmt.executeUpdate();
                 }
@@ -67,7 +98,7 @@ public class InventoryServlet extends HttpServlet {
             e.printStackTrace();
         }
 
-        // Preserve any active category filter or sort order after saving
+        // Preserve active category filter and sort order
         String filterCategory = request.getParameter("filterCategory");
         String sortStock = request.getParameter("sortStock");
         StringBuilder redirectUrl = new StringBuilder("DashboardServlet?tab=inventory");

@@ -70,21 +70,21 @@ public class DashboardServlet extends HttpServlet {
 
             try (Connection conn = DBUtil.getConnection()) {
 
-                // Fetch distinct categories created by users for the filter dropdown
-                String catSql = "SELECT DISTINCT category FROM inventory ORDER BY category ASC";
+                // Fetch distinct categories normalized to UPPERCASE
+                String catSql = "SELECT DISTINCT UPPER(category) AS cat FROM inventory ORDER BY cat ASC";
                 try (PreparedStatement catStmt = conn.prepareStatement(catSql);
                      ResultSet catRs = catStmt.executeQuery()) {
                     while (catRs.next()) {
-                        categories.add(catRs.getString("category"));
+                        categories.add(catRs.getString("cat"));
                     }
                 }
 
                 // Build dynamic query for filtering & sorting
-                StringBuilder invSql = new StringBuilder("SELECT id, product_name, category, stock, low_threshold FROM inventory");
-                boolean hasCategoryFilter = (filterCategory != null && !filterCategory.isEmpty() && !"ALL".equals(filterCategory));
+                StringBuilder invSql = new StringBuilder("SELECT id, product_name, UPPER(category) AS cat, stock, low_threshold FROM inventory");
+                boolean hasCategoryFilter = (filterCategory != null && !filterCategory.isEmpty() && !"ALL".equalsIgnoreCase(filterCategory));
 
                 if (hasCategoryFilter) {
-                    invSql.append(" WHERE category = ?");
+                    invSql.append(" WHERE UPPER(category) = ?");
                 }
 
                 if ("stock_asc".equals(sortStock)) {
@@ -95,14 +95,14 @@ public class DashboardServlet extends HttpServlet {
 
                 try (PreparedStatement invStmt = conn.prepareStatement(invSql.toString())) {
                     if (hasCategoryFilter) {
-                        invStmt.setString(1, filterCategory);
+                        invStmt.setString(1, filterCategory.toUpperCase());
                     }
                     try (ResultSet invRs = invStmt.executeQuery()) {
                         while (invRs.next()) {
                             inventoryList.add(new String[]{
                                 String.valueOf(invRs.getInt("id")),
                                 invRs.getString("product_name"),
-                                invRs.getString("category"),
+                                invRs.getString("cat"),
                                 String.valueOf(invRs.getInt("stock")),
                                 String.valueOf(invRs.getInt("low_threshold"))
                             });
@@ -112,7 +112,7 @@ public class DashboardServlet extends HttpServlet {
 
                 request.setAttribute("categories", categories);
                 request.setAttribute("inventoryList", inventoryList);
-                request.setAttribute("selectedCategory", hasCategoryFilter ? filterCategory : "ALL");
+                request.setAttribute("selectedCategory", hasCategoryFilter ? filterCategory.toUpperCase() : "ALL");
                 request.setAttribute("selectedSort", sortStock != null ? sortStock : "default");
 
             } catch (Exception e) {
