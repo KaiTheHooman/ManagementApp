@@ -1,4 +1,5 @@
 import java.io.IOException;
+import java.math.BigDecimal;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -29,7 +30,7 @@ public class StockAdjustmentServlet extends HttpServlet {
         String currentUser = (String) session.getAttribute("username");
         String action = request.getParameter("action");
 
-        // Cart item format: String[]{cartEntryId, productId, productName, mode ("IN" or "OUT"), qty, note}
+        // Cart item format: String[]{cartEntryId, productId, productName, mode ("IN" or "OUT"), qty, note, lineTotalValue}
         List<String[]> cart = (List<String[]>) session.getAttribute("adjCart");
         if (cart == null) {
             cart = new ArrayList<>();
@@ -40,10 +41,10 @@ public class StockAdjustmentServlet extends HttpServlet {
 
             if ("scan".equals(action)) {
                 String productId = request.getParameter("productId").trim().toUpperCase();
-                String mode = request.getParameter("mode"); // "IN" or "OUT"
+                String mode = request.getParameter("mode");
                 int qty = Math.max(1, Integer.parseInt(request.getParameter("qty")));
 
-                String findSql = "SELECT id, product_name, stock FROM inventory WHERE UPPER(product_id) = ?";
+                String findSql = "SELECT id, product_name, stock, unit_price FROM inventory WHERE UPPER(product_id) = ?";
                 try (PreparedStatement stmt = conn.prepareStatement(findSql)) {
                     stmt.setString(1, productId);
                     try (ResultSet rs = stmt.executeQuery()) {
@@ -57,38 +58,47 @@ public class StockAdjustmentServlet extends HttpServlet {
                         int dbId = rs.getInt("id");
                         String prodName = rs.getString("product_name");
                         int currentStock = rs.getInt("stock");
+                        BigDecimal unitPrice = rs.getBigDecimal("unit_price");
+                        BigDecimal lineValue = unitPrice.multiply(BigDecimal.valueOf(qty));
                         String note = "Standard";
                         int newStock = currentStock;
 
                         if ("IN".equals(mode)) {
                             newStock = currentStock + qty;
                             updateInventoryStock(conn, dbId, newStock);
-                            logMovement(conn, productId, prodName, "STOCK IN (CART)", qty, newStock, currentUser);
-                            note = "Added +" + qty + " to stock";
+                            logMovement(conn, productId, prodName, "STOCK IN (CART)", qty, unitPrice, newStock, currentUser);
+                            note = "Added +" + qty + " @ " + String.format("%.2f", unitPrice) + " each";
 
                         } else if ("OUT".equals(mode)) {
                             if (currentStock < qty) {
-                                // Scan error / discrepancy detected: physical items exist even though system showed empty/insufficient
                                 int extraScanned = qty - currentStock;
-                                int correctedInitial = currentStock + extraScanned; // Raised to match physical count
-                                newStock = 0; // After deducting the scanned 'qty' out
+                                int correctedInitial = currentStock + extraScanned;
+                                newStock = 0;
 
                                 updateInventoryStock(conn, dbId, newStock);
-                                logMovement(conn, productId, prodName, "SCAN DISCREPANCY FIX", extraScanned, correctedInitial, currentUser);
-                                logMovement(conn, productId, prodName, "STOCK OUT (CART)", qty, newStock, currentUser);
+                                logMovement(conn, productId, prodName, "SCAN DISCREPANCY FIX", extraScanned, unitPrice, correctedInitial, currentUser);
+                                logMovement(conn, productId, prodName, "STOCK OUT (CART)", qty, unitPrice, newStock, currentUser);
 
-                                note = "Discrepancy fixed (+" + extraScanned + " extra found), then -" + qty + " out";
+                                note = "Discrepancy fixed (+" + extraScanned + "), then -" + qty + " out";
                             } else {
                                 newStock = currentStock - qty;
                                 updateInventoryStock(conn, dbId, newStock);
-                                logMovement(conn, productId, prodName, "STOCK OUT (CART)", qty, newStock, currentUser);
-                                note = "Deducted -" + qty + " across platform";
+                                logMovement(conn, productId, prodName, "STOCK OUT (CART)", qty, unitPrice, newStock, currentUser);
+                                note = "Deducted -" + qty + " @ " + String.format("%.2f", unitPrice) + " each";
                             }
                         }
 
                         String entryId = String.valueOf(System.nanoTime());
-                        cart.add(new String[]{entryId, productId, prodName, mode, String.valueOf(qty), note});
-                        session.setAttribute("adjMessage", "Processed " + prodName + " (" + productId + ") — Current platform stock: " + newStock);
+                        cart.add(new String[]{
+                            entryId,
+                            productId,
+                            prodName,
+                            mode,
+                            String.valueOf(qty),
+                            note,
+                            String.format("%.2f", lineValue)
+                        });
+                        session.setAttribute("adjMessage", "Processed " + prodName + " (" + productId + ") — Worth: " + String.format("%.2f", lineValue));
                         session.setAttribute("adjMsgType", "success");
                     }
                 }
@@ -104,21 +114,21 @@ public class StockAdjustmentServlet extends HttpServlet {
                         String mode = item[3];
                         int qty = Integer.parseInt(item[4]);
 
-                        // Reverse the stock adjustment on the database
-                        try (PreparedStatement sel = conn.prepareStatement("SELECT id, stock FROM inventory WHERE UPPER(product_id) = ?")) {
+                        try (PreparedStatement sel = conn.prepareStatement("SELECT id, stock, unit_price FROM inventory WHERE UPPER(product_id) = ?")) {
                             sel.setString(1, prodId);
                             try (ResultSet rs = sel.executeQuery()) {
                                 if (rs.next()) {
                                     int dbId = rs.getInt("id");
                                     int curStock = rs.getInt("stock");
+                                    BigDecimal unitPrice = rs.getBigDecimal("unit_price");
                                     int revertedStock = "IN".equals(mode) ? Math.max(0, curStock - qty) : (curStock + qty);
                                     updateInventoryStock(conn, dbId, revertedStock);
-                                    logMovement(conn, prodId, prodName, "CART UNDO (" + mode + ")", qty, revertedStock, currentUser);
+                                    logMovement(conn, prodId, prodName, "CART UNDO (" + mode + ")", qty, unitPrice, revertedStock, currentUser);
                                 }
                             }
                         }
                         it.remove();
-                        session.setAttribute("adjMessage", "Removed " + prodName + " from cart and reverted stock.");
+                        session.setAttribute("adjMessage", "Removed " + prodName + " from cart and reverted stock & value.");
                         session.setAttribute("adjMsgType", "success");
                         break;
                     }
@@ -148,15 +158,18 @@ public class StockAdjustmentServlet extends HttpServlet {
         }
     }
 
-    private void logMovement(Connection conn, String prodId, String prodName, String type, int qty, int resultingStock, String user) {
-        String sql = "INSERT INTO stock_logs (product_id, product_name, action_type, qty_changed, resulting_stock, performed_by) VALUES (?, ?, ?, ?, ?, ?)";
+    private void logMovement(Connection conn, String prodId, String prodName, String type, int qty, BigDecimal unitPrice, int resultingStock, String user) {
+        BigDecimal totalValue = unitPrice.multiply(BigDecimal.valueOf(qty));
+        String sql = "INSERT INTO stock_logs (product_id, product_name, action_type, qty_changed, unit_price, total_value, resulting_stock, performed_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
         try (PreparedStatement stmt = conn.prepareStatement(sql)) {
             stmt.setString(1, prodId);
             stmt.setString(2, prodName);
             stmt.setString(3, type);
             stmt.setInt(4, qty);
-            stmt.setInt(5, resultingStock);
-            stmt.setString(6, user);
+            stmt.setBigDecimal(5, unitPrice);
+            stmt.setBigDecimal(6, totalValue);
+            stmt.setInt(7, resultingStock);
+            stmt.setString(8, user);
             stmt.executeUpdate();
         } catch (Exception e) {
             e.printStackTrace();

@@ -1,4 +1,5 @@
 import java.io.IOException;
+import java.math.BigDecimal;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -59,13 +60,14 @@ public class DashboardServlet extends HttpServlet {
             }
         }
 
-        // 2. Manage Inventory (with Product ID, Category Filter & Stock Sort)
+        // 2. Manage Inventory & Adjustment Lookup
         if ("inventory".equals(tab) || "adjustment".equals(tab)) {
             String filterCategory = request.getParameter("category");
             String sortStock = request.getParameter("sort");
 
             List<String> categories = new ArrayList<>();
             List<String[]> inventoryList = new ArrayList<>();
+            BigDecimal filteredWorth = BigDecimal.ZERO;
 
             try (Connection conn = DBUtil.getConnection()) {
 
@@ -78,7 +80,7 @@ public class DashboardServlet extends HttpServlet {
                 }
 
                 StringBuilder invSql = new StringBuilder(
-                    "SELECT id, product_id, product_name, UPPER(category) AS cat, stock, low_threshold FROM inventory"
+                    "SELECT id, product_id, product_name, UPPER(category) AS cat, stock, low_threshold, unit_price FROM inventory"
                 );
                 boolean hasCategoryFilter = (filterCategory != null && !filterCategory.isEmpty() && !"ALL".equalsIgnoreCase(filterCategory));
 
@@ -98,13 +100,21 @@ public class DashboardServlet extends HttpServlet {
                     }
                     try (ResultSet invRs = invStmt.executeQuery()) {
                         while (invRs.next()) {
+                            int stk = invRs.getInt("stock");
+                            BigDecimal price = invRs.getBigDecimal("unit_price");
+                            if (price == null) price = BigDecimal.ZERO;
+                            BigDecimal lineWorth = price.multiply(BigDecimal.valueOf(stk));
+                            filteredWorth = filteredWorth.add(lineWorth);
+
                             inventoryList.add(new String[]{
                                 String.valueOf(invRs.getInt("id")),
                                 invRs.getString("product_id"),
                                 invRs.getString("product_name"),
                                 invRs.getString("cat"),
-                                String.valueOf(invRs.getInt("stock")),
-                                String.valueOf(invRs.getInt("low_threshold"))
+                                String.valueOf(stk),
+                                String.valueOf(invRs.getInt("low_threshold")),
+                                String.format("%.2f", price),
+                                String.format("%.2f", lineWorth)
                             });
                         }
                     }
@@ -112,6 +122,7 @@ public class DashboardServlet extends HttpServlet {
 
                 request.setAttribute("categories", categories);
                 request.setAttribute("inventoryList", inventoryList);
+                request.setAttribute("filteredWorth", String.format("%.2f", filteredWorth));
                 request.setAttribute("selectedCategory", hasCategoryFilter ? filterCategory.toUpperCase() : "ALL");
                 request.setAttribute("selectedSort", sortStock != null ? sortStock : "default");
 
@@ -121,19 +132,23 @@ public class DashboardServlet extends HttpServlet {
             }
         }
 
-        // 3. Inventory Summary & Tracking Tab
+        // 3. Inventory Summary & Financial Tracking Tab
         if ("summary".equals(tab)) {
             int totalProducts = 0;
             int totalUnits = 0;
             int lowStockCount = 0;
             int outOfStockCount = 0;
+            BigDecimal totalInventoryWorth = BigDecimal.ZERO;
+            BigDecimal totalWorthIn = BigDecimal.ZERO;
+            BigDecimal totalWorthOut = BigDecimal.ZERO;
             List<String[]> categorySummary = new ArrayList<>();
             List<String[]> stockLogs = new ArrayList<>();
 
             try (Connection conn = DBUtil.getConnection()) {
 
-                // Overall KPI totals
+                // Overall Inventory KPI + Total Worth
                 String kpiSql = "SELECT COUNT(*) AS prod_cnt, COALESCE(SUM(stock), 0) AS unit_sum, "
+                              + "COALESCE(SUM(stock * unit_price), 0) AS total_worth, "
                               + "SUM(CASE WHEN stock <= low_threshold AND stock > 0 THEN 1 ELSE 0 END) AS low_cnt, "
                               + "SUM(CASE WHEN stock = 0 THEN 1 ELSE 0 END) AS out_cnt FROM inventory";
                 try (PreparedStatement kpiStmt = conn.prepareStatement(kpiSql);
@@ -141,27 +156,43 @@ public class DashboardServlet extends HttpServlet {
                     if (rs.next()) {
                         totalProducts = rs.getInt("prod_cnt");
                         totalUnits = rs.getInt("unit_sum");
+                        totalInventoryWorth = rs.getBigDecimal("total_worth");
                         lowStockCount = rs.getInt("low_cnt");
                         outOfStockCount = rs.getInt("out_cnt");
                     }
                 }
 
-                // Category-by-category breakdown
-                String catSumSql = "SELECT UPPER(category) AS cat, COUNT(*) AS item_cnt, SUM(stock) AS total_qty "
-                                 + "FROM inventory GROUP BY UPPER(category) ORDER BY total_qty DESC";
+                // Total Monetary Worth IN vs OUT from Stock Logs
+                String flowSql = "SELECT "
+                               + "COALESCE(SUM(CASE WHEN action_type IN ('INITIAL STOCK', 'STOCK IN (MERGE)', 'STOCK IN (CART)', 'MANUAL IN', 'SCAN DISCREPANCY FIX', 'CART UNDO (OUT)') THEN total_value ELSE 0 END), 0) AS worth_in, "
+                               + "COALESCE(SUM(CASE WHEN action_type IN ('STOCK OUT (CART)', 'MANUAL OUT', 'REMOVED PRODUCT', 'CART UNDO (IN)') THEN total_value ELSE 0 END), 0) AS worth_out "
+                               + "FROM stock_logs";
+                try (PreparedStatement flowStmt = conn.prepareStatement(flowSql);
+                     ResultSet rs = flowStmt.executeQuery()) {
+                    if (rs.next()) {
+                        totalWorthIn = rs.getBigDecimal("worth_in");
+                        totalWorthOut = rs.getBigDecimal("worth_out");
+                    }
+                }
+
+                // Category breakdown with Category Worth
+                String catSumSql = "SELECT UPPER(category) AS cat, COUNT(*) AS item_cnt, SUM(stock) AS total_qty, "
+                                 + "COALESCE(SUM(stock * unit_price), 0) AS cat_worth "
+                                 + "FROM inventory GROUP BY UPPER(category) ORDER BY cat_worth DESC";
                 try (PreparedStatement catStmt = conn.prepareStatement(catSumSql);
                      ResultSet rs = catStmt.executeQuery()) {
                     while (rs.next()) {
                         categorySummary.add(new String[]{
                             rs.getString("cat"),
                             String.valueOf(rs.getInt("item_cnt")),
-                            String.valueOf(rs.getInt("total_qty"))
+                            String.valueOf(rs.getInt("total_qty")),
+                            String.format("%.2f", rs.getBigDecimal("cat_worth"))
                         });
                     }
                 }
 
-                // Recent stock movement logs (latest 30 entries)
-                String logSql = "SELECT product_id, product_name, action_type, qty_changed, resulting_stock, performed_by, created_at "
+                // Recent stock movement logs with unit price & total value
+                String logSql = "SELECT product_id, product_name, action_type, qty_changed, unit_price, total_value, resulting_stock, performed_by, created_at "
                               + "FROM stock_logs ORDER BY log_id DESC FETCH FIRST 30 ROWS ONLY";
                 try (PreparedStatement logStmt = conn.prepareStatement(logSql);
                      ResultSet rs = logStmt.executeQuery()) {
@@ -171,6 +202,8 @@ public class DashboardServlet extends HttpServlet {
                             rs.getString("product_name"),
                             rs.getString("action_type"),
                             String.valueOf(rs.getInt("qty_changed")),
+                            String.format("%.2f", rs.getBigDecimal("unit_price")),
+                            String.format("%.2f", rs.getBigDecimal("total_value")),
                             String.valueOf(rs.getInt("resulting_stock")),
                             rs.getString("performed_by"),
                             String.valueOf(rs.getTimestamp("created_at"))
@@ -187,6 +220,9 @@ public class DashboardServlet extends HttpServlet {
             request.setAttribute("totalUnits", totalUnits);
             request.setAttribute("lowStockCount", lowStockCount);
             request.setAttribute("outOfStockCount", outOfStockCount);
+            request.setAttribute("totalInventoryWorth", String.format("%.2f", totalInventoryWorth));
+            request.setAttribute("totalWorthIn", String.format("%.2f", totalWorthIn));
+            request.setAttribute("totalWorthOut", String.format("%.2f", totalWorthOut));
             request.setAttribute("categorySummary", categorySummary);
             request.setAttribute("stockLogs", stockLogs);
         }

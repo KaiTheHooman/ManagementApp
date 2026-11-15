@@ -118,6 +118,7 @@
             min-width: 0;
             min-height: 100vh;
         }
+        /* Sticky Top Bar */
         .topbar {
             position: sticky;
             top: 0;
@@ -151,14 +152,14 @@
         }
         .content-area {
             padding: 32px;
-            max-width: 1160px;
+            max-width: 1220px;
             width: 100%;
         }
 
         /* Cards & Grids */
         .grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
             gap: 20px;
             margin-bottom: 24px;
         }
@@ -179,6 +180,9 @@
         .card.danger-card {
             border-top-color: #e53e3e;
         }
+        .card.purple-card {
+            border-top-color: #805ad5;
+        }
         .card h2 {
             font-size: 19px;
             color: #1a202c;
@@ -189,7 +193,7 @@
             color: #2d3748;
         }
         .kpi-number {
-            font-size: 32px;
+            font-size: 28px;
             font-weight: 700;
             color: #1a202c;
             margin: 6px 0;
@@ -203,8 +207,8 @@
         /* Forms */
         .inv-form-grid {
             display: grid;
-            grid-template-columns: 1.2fr 1.8fr 1.4fr 0.9fr 0.9fr auto;
-            gap: 12px;
+            grid-template-columns: 1.1fr 1.6fr 1.3fr 0.9fr 0.8fr 0.8fr auto;
+            gap: 10px;
             align-items: end;
             margin-top: 16px;
         }
@@ -224,7 +228,7 @@
         }
         .field-box input, .field-box select, .filter-bar select {
             width: 100%;
-            padding: 9px 11px;
+            padding: 9px 10px;
             border: 1px solid #cbd5e0;
             border-radius: 6px;
             font-size: 14px;
@@ -238,7 +242,7 @@
             background-color: #3182ce;
             color: #ffffff;
             border: none;
-            padding: 10px 18px;
+            padding: 10px 16px;
             border-radius: 6px;
             font-size: 14px;
             font-weight: 600;
@@ -252,9 +256,9 @@
             background-color: #38a169;
             color: #ffffff;
             border: none;
-            padding: 7px 14px;
+            padding: 6px 12px;
             border-radius: 5px;
-            font-size: 13px;
+            font-size: 12px;
             font-weight: 600;
             cursor: pointer;
         }
@@ -265,7 +269,7 @@
             background-color: #fff5f5;
             color: #c53030;
             border: 1px solid #feb2b2;
-            padding: 5px 11px;
+            padding: 5px 10px;
             border-radius: 5px;
             font-size: 12px;
             font-weight: 600;
@@ -332,7 +336,7 @@
         }
         .data-table th, .data-table td {
             text-align: left;
-            padding: 12px 12px;
+            padding: 11px 10px;
             border-bottom: 1px solid #e2e8f0;
             vertical-align: middle;
         }
@@ -352,7 +356,7 @@
             background-color: #edf2f7;
             padding: 3px 7px;
             border-radius: 4px;
-            font-size: 13px;
+            font-size: 12px;
             font-weight: 700;
             color: #2d3748;
         }
@@ -360,16 +364,16 @@
             display: inline-block;
             padding: 3px 9px;
             border-radius: 12px;
-            font-size: 12px;
+            font-size: 11px;
             font-weight: 600;
             background-color: #ebf8ff;
             color: #2b6cb0;
         }
         .status-badge {
             display: inline-block;
-            padding: 3px 9px;
+            padding: 3px 8px;
             border-radius: 4px;
-            font-size: 12px;
+            font-size: 11px;
             font-weight: 700;
         }
         .status-ok {
@@ -381,8 +385,15 @@
             color: #9b2c2c;
         }
         .num-input {
-            width: 72px;
-            padding: 6px 8px;
+            width: 66px;
+            padding: 5px 6px;
+            border: 1px solid #cbd5e0;
+            border-radius: 5px;
+            font-size: 13px;
+        }
+        .price-input {
+            width: 82px;
+            padding: 5px 6px;
             border: 1px solid #cbd5e0;
             border-radius: 5px;
             font-size: 13px;
@@ -463,7 +474,7 @@
                 <% } else if ("adjustment".equals(activeTab)) { %>
                     Stock Adjustment (Cart)
                 <% } else if ("summary".equals(activeTab)) { %>
-                    Inventory Summary &amp; Tracking
+                    Inventory Summary &amp; Valuation
                 <% } else if ("users".equals(activeTab)) { %>
                     User Access Management
                 <% } else if ("profile".equals(activeTab)) { %>
@@ -482,14 +493,15 @@
             <% if ("inventory".equals(activeTab)) {
                 List<String> categories = (List<String>) request.getAttribute("categories");
                 List<String[]> inventoryList = (List<String[]>) request.getAttribute("inventoryList");
+                String filteredWorth = (String) request.getAttribute("filteredWorth");
                 String selectedCategory = (String) request.getAttribute("selectedCategory");
                 String selectedSort = (String) request.getAttribute("selectedSort");
                 String invError = (String) request.getAttribute("invError");
             %>
-                <!-- 1. Add New Product Card (With Product ID) -->
+                <!-- 1. Add New Product Card (With Product ID & Unit Price) -->
                 <div class="card">
                     <h2>Add Product to Inventory</h2>
-                    <p class="subtext">Enter a unique Product ID and required Category (automatically formatted in CAPS). Duplicate IDs or items merge stock automatically.</p>
+                    <p class="subtext">Enter a unique Product ID, required Category (in CAPS), unit price, initial stock, and low-stock threshold.</p>
 
                     <form action="InventoryServlet" method="POST" class="inv-form-grid">
                         <input type="hidden" name="action" value="add">
@@ -519,12 +531,17 @@
                         </div>
 
                         <div class="field-box">
-                            <label for="stock">Stock Left *</label>
+                            <label for="unitPrice">Unit Price *</label>
+                            <input type="number" id="unitPrice" name="unitPrice" min="0" step="0.01" value="0.00" required>
+                        </div>
+
+                        <div class="field-box">
+                            <label for="stock">Stock *</label>
                             <input type="number" id="stock" name="stock" min="0" value="10" required>
                         </div>
 
                         <div class="field-box">
-                            <label for="threshold">Low Alert *</label>
+                            <label for="threshold">Alert &le; *</label>
                             <input type="number" id="threshold" name="threshold" min="0" value="5" required>
                         </div>
 
@@ -537,7 +554,7 @@
                     <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 12px;">
                         <div>
                             <h2>Current Stock Inventory</h2>
-                            <p class="subtext">Filter by category or sort stock from smallest to largest. Items at or below your threshold highlight in red.</p>
+                            <p class="subtext">Filter by category or sort stock from smallest to largest. Update price, stock, or threshold anytime.</p>
                         </div>
 
                         <% if (isAdmin && inventoryList != null && !inventoryList.isEmpty()) { %>
@@ -573,7 +590,8 @@
                             </select>
                         </div>
                         <span class="subtext">
-                            Showing <strong><%= inventoryList != null ? inventoryList.size() : 0 %></strong> item(s)
+                            Showing <strong><%= inventoryList != null ? inventoryList.size() : 0 %></strong> item(s) |
+                            Total Worth: <strong style="color: #2f855a;"><%= filteredWorth != null ? filteredWorth : "0.00" %></strong>
                         </span>
                     </form>
 
@@ -587,7 +605,8 @@
                                     <th>Product Name</th>
                                     <th>Category</th>
                                     <th>Status</th>
-                                    <th>Stocks Left &amp; Threshold</th>
+                                    <th>Total Worth</th>
+                                    <th>Price, Stock &amp; Threshold</th>
                                     <th>Remove</th>
                                 </tr>
                             </thead>
@@ -599,6 +618,8 @@
                                     String pCat = item[3];
                                     int stockLeft = Integer.parseInt(item[4]);
                                     int lowThresh = Integer.parseInt(item[5]);
+                                    String unitPrice = item[6];
+                                    String lineWorth = item[7];
                                     boolean isLow = stockLeft <= lowThresh;
                                 %>
                                 <tr class="<%= isLow ? "low-stock-row" : "" %>">
@@ -614,17 +635,21 @@
                                             <span class="status-badge status-ok">In Stock</span>
                                         <% } %>
                                     </td>
+                                    <td><strong><%= lineWorth %></strong></td>
                                     <td>
-                                        <form action="InventoryServlet" method="POST" style="display: flex; align-items: center; gap: 8px; margin: 0;">
+                                        <form action="InventoryServlet" method="POST" style="display: flex; align-items: center; gap: 6px; margin: 0; flex-wrap: wrap;">
                                             <input type="hidden" name="action" value="update">
                                             <input type="hidden" name="id" value="<%= id %>">
                                             <input type="hidden" name="filterCategory" value="<%= selectedCategory %>">
                                             <input type="hidden" name="sortStock" value="<%= selectedSort %>">
 
-                                            <label style="font-size: 12px; color: #4a5568;">Stock:</label>
+                                            <label style="font-size: 11px; color: #4a5568;">Price:</label>
+                                            <input type="number" name="unitPrice" value="<%= unitPrice %>" min="0" step="0.01" class="price-input" required>
+
+                                            <label style="font-size: 11px; color: #4a5568;">Stock:</label>
                                             <input type="number" name="stock" value="<%= stockLeft %>" min="0" class="num-input" required>
 
-                                            <label style="font-size: 12px; color: #4a5568;">Alert &le;</label>
+                                            <label style="font-size: 11px; color: #4a5568;">Alert &le;</label>
                                             <input type="number" name="threshold" value="<%= lowThresh %>" min="0" class="num-input" required>
 
                                             <button type="submit" class="btn-save">Update</button>
@@ -670,8 +695,7 @@
                 <div class="card">
                     <h2>Stock In / Stock Out Scanner</h2>
                     <p class="subtext">
-                        Enter or scan a <strong>Product ID</strong> into the empty box below. Stock is updated immediately across the platform.
-                        If an item shows 0 stock in the system during a Stock Out scan, the extra scanned units are automatically reconciled.
+                        Enter or scan a <strong>Product ID</strong> into the empty box below. Stock and inventory valuation update immediately across the platform.
                     </p>
 
                     <form action="StockAdjustmentServlet" method="POST" class="adj-form-grid">
@@ -684,7 +708,7 @@
                             <datalist id="productIdSuggestions">
                                 <% if (inventoryList != null) {
                                     for (String[] item : inventoryList) { %>
-                                        <option value="<%= item[1] %>"><%= item[2] %> (Stock: <%= item[4] %>)</option>
+                                        <option value="<%= item[1] %>"><%= item[2] %> (Stock: <%= item[4] %> @ <%= item[6] %>)</option>
                                 <%  }
                                 } %>
                             </datalist>
@@ -712,7 +736,7 @@
                     <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
                         <div>
                             <h2>Your Active Adjustment Cart (<%= currentUser %>)</h2>
-                            <p class="subtext">Items listed here have already been applied to live platform stock. Undo an entry or confirm when done.</p>
+                            <p class="subtext">Items listed here have already been applied to live platform stock and valuation.</p>
                         </div>
                         <% if (adjCart != null && !adjCart.isEmpty()) { %>
                             <form action="StockAdjustmentServlet" method="POST" style="margin: 0;">
@@ -730,6 +754,7 @@
                                     <th>Product Name</th>
                                     <th>Type</th>
                                     <th>Qty</th>
+                                    <th>Line Worth</th>
                                     <th>System Action Note</th>
                                     <th>Undo</th>
                                 </tr>
@@ -747,6 +772,7 @@
                                         </span>
                                     </td>
                                     <td><strong><%= isOut ? "-" : "+" %><%= cItem[4] %></strong></td>
+                                    <td><strong><%= cItem.length > 6 ? cItem[6] : "0.00" %></strong></td>
                                     <td class="subtext"><%= cItem[5] %></td>
                                     <td>
                                         <form action="StockAdjustmentServlet" method="POST" style="margin: 0;">
@@ -769,6 +795,9 @@
                 Integer totalUnits = (Integer) request.getAttribute("totalUnits");
                 Integer lowStockCount = (Integer) request.getAttribute("lowStockCount");
                 Integer outOfStockCount = (Integer) request.getAttribute("outOfStockCount");
+                String totalInventoryWorth = (String) request.getAttribute("totalInventoryWorth");
+                String totalWorthIn = (String) request.getAttribute("totalWorthIn");
+                String totalWorthOut = (String) request.getAttribute("totalWorthOut");
                 List<String[]> categorySummary = (List<String[]>) request.getAttribute("categorySummary");
                 List<String[]> stockLogs = (List<String[]>) request.getAttribute("stockLogs");
                 String summaryError = (String) request.getAttribute("summaryError");
@@ -777,14 +806,33 @@
                     <div class="alert-box alert-error"><%= summaryError %></div>
                 <% } %>
 
-                <!-- 1. KPI Summary Cards -->
+                <!-- 1. Financial Worth KPI Cards -->
+                <div class="grid">
+                    <div class="card purple-card">
+                        <span class="subtext">Whole Inventory Worth</span>
+                        <div class="kpi-number" style="color: #553c9a;"><%= totalInventoryWorth != null ? totalInventoryWorth : "0.00" %></div>
+                        <p class="subtext">Current value of all stock on hand</p>
+                    </div>
+                    <div class="card admin-card">
+                        <span class="subtext">Total Worth IN</span>
+                        <div class="kpi-number" style="color: #2f855a;">+<%= totalWorthIn != null ? totalWorthIn : "0.00" %></div>
+                        <p class="subtext">Cumulative value added / stocked in</p>
+                    </div>
+                    <div class="card danger-card">
+                        <span class="subtext">Total Worth OUT</span>
+                        <div class="kpi-number" style="color: #c53030;">-<%= totalWorthOut != null ? totalWorthOut : "0.00" %></div>
+                        <p class="subtext">Cumulative value deducted / stocked out</p>
+                    </div>
+                </div>
+
+                <!-- 2. Unit & Alert KPI Cards -->
                 <div class="grid">
                     <div class="card">
                         <span class="subtext">Total Unique Products</span>
                         <div class="kpi-number"><%= totalProducts != null ? totalProducts : 0 %></div>
                         <p class="subtext">Registered Product IDs</p>
                     </div>
-                    <div class="card admin-card">
+                    <div class="card">
                         <span class="subtext">Total Units in Stock</span>
                         <div class="kpi-number"><%= totalUnits != null ? totalUnits : 0 %></div>
                         <p class="subtext">Combined available items</p>
@@ -801,10 +849,10 @@
                     </div>
                 </div>
 
-                <!-- 2. Stock Summary by Category -->
+                <!-- 3. Stock & Worth Summary by Category -->
                 <div class="card">
-                    <h2>Stock Summary by Category</h2>
-                    <p class="subtext">Breakdown of total products and stock volume per category.</p>
+                    <h2>Stock &amp; Valuation Summary by Category</h2>
+                    <p class="subtext">Breakdown of products, total stock units, and total monetary worth per category.</p>
 
                     <% if (categorySummary != null && !categorySummary.isEmpty()) { %>
                         <table class="data-table">
@@ -813,6 +861,7 @@
                                     <th>Category</th>
                                     <th>Unique Products</th>
                                     <th>Total Stock Units</th>
+                                    <th>Category Worth</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -820,7 +869,8 @@
                                 <tr>
                                     <td><span class="cat-badge"><%= cs[0] %></span></td>
                                     <td><%= cs[1] %> product(s)</td>
-                                    <td><strong><%= cs[2] %> units</strong></td>
+                                    <td><%= cs[2] %> units</td>
+                                    <td><strong><%= cs[3] %></strong></td>
                                 </tr>
                                 <% } %>
                             </tbody>
@@ -830,10 +880,10 @@
                     <% } %>
                 </div>
 
-                <!-- 3. Stock Movement & Audit Tracking Log -->
+                <!-- 4. Stock Movement & Value Tracking Log -->
                 <div class="card">
-                    <h2>Recent Stock Movement &amp; Discrepancy Log</h2>
-                    <p class="subtext">Tracks every Stock In, Stock Out, Manual Update, and Scan Discrepancy Fix across all users.</p>
+                    <h2>Recent Stock Movement &amp; Value Log</h2>
+                    <p class="subtext">Tracks every Stock In, Stock Out, Manual Update, and Scan Discrepancy Fix along with unit price and total value.</p>
 
                     <% if (stockLogs != null && !stockLogs.isEmpty()) { %>
                         <table class="data-table">
@@ -842,7 +892,9 @@
                                     <th>Product ID</th>
                                     <th>Product Name</th>
                                     <th>Action</th>
-                                    <th>Qty Changed</th>
+                                    <th>Qty</th>
+                                    <th>Unit Price</th>
+                                    <th>Total Value</th>
                                     <th>Stock After</th>
                                     <th>User</th>
                                     <th>Timestamp</th>
@@ -863,8 +915,10 @@
                                     </td>
                                     <td><strong><%= isNegative ? "-" : "+" %><%= log[3] %></strong></td>
                                     <td><%= log[4] %></td>
-                                    <td><%= log[5] %></td>
-                                    <td class="subtext"><%= log[6] %></td>
+                                    <td><strong><%= isNegative ? "-" : "+" %><%= log[5] %></strong></td>
+                                    <td><%= log[6] %></td>
+                                    <td><%= log[7] %></td>
+                                    <td class="subtext"><%= log[8] %></td>
                                 </tr>
                                 <% } %>
                             </tbody>
@@ -945,15 +999,15 @@
                     </div>
                     <div class="card">
                         <h3>Manage Inventory</h3>
-                        <p class="subtext">Add products with unique Product IDs, CAPS categories, and custom low-stock alerts.</p>
+                        <p class="subtext">Assign unit prices, Product IDs, CAPS categories, and custom low-stock alerts.</p>
                     </div>
                     <div class="card admin-card">
                         <h3>Stock Adjustment</h3>
-                        <p class="subtext">Scan Product IDs to Stock In or Stock Out with automatic live deduction and scan discrepancy recovery.</p>
+                        <p class="subtext">Scan Product IDs to Stock In or Stock Out with automatic live deduction and value tracking.</p>
                     </div>
-                    <div class="card warn-card">
+                    <div class="card purple-card">
                         <h3>Inventory Summary</h3>
-                        <p class="subtext">View total stock metrics, category totals, and complete movement audit history.</p>
+                        <p class="subtext">View whole inventory worth, total worth in vs out, category valuations, and audit logs.</p>
                     </div>
                 </div>
             <% } %>

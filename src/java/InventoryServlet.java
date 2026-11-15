@@ -1,4 +1,5 @@
 import java.io.IOException;
+import java.math.BigDecimal;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -21,7 +22,7 @@ public class InventoryServlet extends HttpServlet {
             response.sendRedirect("index.html");
             return;
         }
-            
+
         String currentUser = (String) session.getAttribute("username");
         String action = request.getParameter("action");
 
@@ -33,8 +34,8 @@ public class InventoryServlet extends HttpServlet {
                 String category = request.getParameter("category").trim().toUpperCase();
                 int addedStock = Math.max(0, Integer.parseInt(request.getParameter("stock")));
                 int threshold = Math.max(0, Integer.parseInt(request.getParameter("threshold")));
+                BigDecimal unitPrice = new BigDecimal(request.getParameter("unitPrice")).max(BigDecimal.ZERO);
 
-                // Check if Product ID OR same (Product Name + Category) already exists
                 String checkSql = "SELECT id, product_id, product_name, stock FROM inventory "
                                 + "WHERE UPPER(product_id) = ? OR (LOWER(product_name) = LOWER(?) AND UPPER(category) = ?)";
                 int existingId = -1;
@@ -58,34 +59,36 @@ public class InventoryServlet extends HttpServlet {
 
                 if (existingId != -1) {
                     int newTotal = existingStock + addedStock;
-                    String mergeSql = "UPDATE inventory SET stock = ?, low_threshold = ?, category = ? WHERE id = ?";
+                    String mergeSql = "UPDATE inventory SET stock = ?, low_threshold = ?, category = ?, unit_price = ? WHERE id = ?";
                     try (PreparedStatement mergeStmt = conn.prepareStatement(mergeSql)) {
                         mergeStmt.setInt(1, newTotal);
                         mergeStmt.setInt(2, threshold);
                         mergeStmt.setString(3, category);
-                        mergeStmt.setInt(4, existingId);
+                        mergeStmt.setBigDecimal(4, unitPrice);
+                        mergeStmt.setInt(5, existingId);
                         mergeStmt.executeUpdate();
                     }
-                    logMovement(conn, existingProdId, existingProdName, "STOCK IN (MERGE)", addedStock, newTotal, currentUser);
+                    logMovement(conn, existingProdId, existingProdName, "STOCK IN (MERGE)", addedStock, unitPrice, newTotal, currentUser);
                 } else {
-                    String insertSql = "INSERT INTO inventory (product_id, product_name, category, stock, low_threshold) VALUES (?, ?, ?, ?, ?)";
+                    String insertSql = "INSERT INTO inventory (product_id, product_name, category, stock, low_threshold, unit_price) VALUES (?, ?, ?, ?, ?, ?)";
                     try (PreparedStatement insertStmt = conn.prepareStatement(insertSql)) {
                         insertStmt.setString(1, productId);
                         insertStmt.setString(2, productName);
                         insertStmt.setString(3, category);
                         insertStmt.setInt(4, addedStock);
                         insertStmt.setInt(5, threshold);
+                        insertStmt.setBigDecimal(6, unitPrice);
                         insertStmt.executeUpdate();
                     }
-                    logMovement(conn, productId, productName, "INITIAL STOCK", addedStock, addedStock, currentUser);
+                    logMovement(conn, productId, productName, "INITIAL STOCK", addedStock, unitPrice, addedStock, currentUser);
                 }
 
             } else if ("update".equals(action)) {
                 int id = Integer.parseInt(request.getParameter("id"));
                 int newStock = Math.max(0, Integer.parseInt(request.getParameter("stock")));
                 int threshold = Math.max(0, Integer.parseInt(request.getParameter("threshold")));
+                BigDecimal newPrice = new BigDecimal(request.getParameter("unitPrice")).max(BigDecimal.ZERO);
 
-                // Fetch current info for audit log
                 String prodId = "";
                 String prodName = "";
                 int oldStock = 0;
@@ -100,18 +103,19 @@ public class InventoryServlet extends HttpServlet {
                     }
                 }
 
-                String sql = "UPDATE inventory SET stock = ?, low_threshold = ? WHERE id = ?";
+                String sql = "UPDATE inventory SET stock = ?, low_threshold = ?, unit_price = ? WHERE id = ?";
                 try (PreparedStatement stmt = conn.prepareStatement(sql)) {
                     stmt.setInt(1, newStock);
                     stmt.setInt(2, threshold);
-                    stmt.setInt(3, id);
+                    stmt.setBigDecimal(3, newPrice);
+                    stmt.setInt(4, id);
                     stmt.executeUpdate();
                 }
 
                 if (newStock != oldStock && !prodId.isEmpty()) {
                     int diff = newStock - oldStock;
                     String type = diff > 0 ? "MANUAL IN" : "MANUAL OUT";
-                    logMovement(conn, prodId, prodName, type, Math.abs(diff), newStock, currentUser);
+                    logMovement(conn, prodId, prodName, type, Math.abs(diff), newPrice, newStock, currentUser);
                 }
 
             } else if ("delete".equals(action)) {
@@ -120,13 +124,15 @@ public class InventoryServlet extends HttpServlet {
                 String prodId = "";
                 String prodName = "";
                 int oldStock = 0;
-                try (PreparedStatement sel = conn.prepareStatement("SELECT product_id, product_name, stock FROM inventory WHERE id = ?")) {
+                BigDecimal oldPrice = BigDecimal.ZERO;
+                try (PreparedStatement sel = conn.prepareStatement("SELECT product_id, product_name, stock, unit_price FROM inventory WHERE id = ?")) {
                     sel.setInt(1, id);
                     try (ResultSet rs = sel.executeQuery()) {
                         if (rs.next()) {
                             prodId = rs.getString("product_id");
                             prodName = rs.getString("product_name");
                             oldStock = rs.getInt("stock");
+                            oldPrice = rs.getBigDecimal("unit_price");
                         }
                     }
                 }
@@ -138,17 +144,16 @@ public class InventoryServlet extends HttpServlet {
                 }
 
                 if (!prodId.isEmpty()) {
-                    logMovement(conn, prodId, prodName, "REMOVED PRODUCT", oldStock, 0, currentUser);
+                    logMovement(conn, prodId, prodName, "REMOVED PRODUCT", oldStock, oldPrice, 0, currentUser);
                 }
+
             } else if ("clear_all".equals(action)) {
-                // Strict server-side check: only "admin" can clear the whole inventory
                 if ("admin".equals(currentUser)) {
                     try (PreparedStatement stmt = conn.prepareStatement("DELETE FROM inventory")) {
                         stmt.executeUpdate();
                     }
-                    // Also clear any active adjustment cart in session so stale items don't remain
                     session.removeAttribute("adjCart");
-                    logMovement(conn, "ALL", "ENTIRE INVENTORY", "CLEARED ALL (ADMIN RESET)", 0, 0, currentUser);
+                    logMovement(conn, "ALL", "ENTIRE INVENTORY", "CLEARED ALL (ADMIN RESET)", 0, BigDecimal.ZERO, 0, currentUser);
                 }
             }
 
@@ -170,15 +175,18 @@ public class InventoryServlet extends HttpServlet {
         response.sendRedirect(redirectUrl.toString());
     }
 
-    private void logMovement(Connection conn, String prodId, String prodName, String type, int qty, int resultingStock, String user) {
-        String sql = "INSERT INTO stock_logs (product_id, product_name, action_type, qty_changed, resulting_stock, performed_by) VALUES (?, ?, ?, ?, ?, ?)";
+    private void logMovement(Connection conn, String prodId, String prodName, String type, int qty, BigDecimal unitPrice, int resultingStock, String user) {
+        BigDecimal totalValue = unitPrice.multiply(BigDecimal.valueOf(qty));
+        String sql = "INSERT INTO stock_logs (product_id, product_name, action_type, qty_changed, unit_price, total_value, resulting_stock, performed_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
         try (PreparedStatement stmt = conn.prepareStatement(sql)) {
             stmt.setString(1, prodId);
             stmt.setString(2, prodName);
             stmt.setString(3, type);
             stmt.setInt(4, qty);
-            stmt.setInt(5, resultingStock);
-            stmt.setString(6, user);
+            stmt.setBigDecimal(5, unitPrice);
+            stmt.setBigDecimal(6, totalValue);
+            stmt.setInt(7, resultingStock);
+            stmt.setString(8, user);
             stmt.executeUpdate();
         } catch (Exception e) {
             e.printStackTrace();
