@@ -132,7 +132,59 @@ public class DashboardServlet extends HttpServlet {
             }
         }
 
-        // 3. Inventory Summary & Financial Tracking Tab
+        // 3. Venue & Equipment Bookings (Loaded for both 'bookings' and 'summary' tabs)
+        if ("bookings".equals(tab) || "summary".equals(tab)) {
+            List<String[]> upcomingBookings = new ArrayList<>();
+            List<String> knownVenues = new ArrayList<>();
+            List<String> equipmentOptions = new ArrayList<>();
+
+            try (Connection conn = DBUtil.getConnection()) {
+                // Fetch upcoming bookings from today onwards
+                String bookSql = "SELECT booking_id, venue_name, equipment_needed, booking_date, time_slot, purpose, booked_by "
+                               + "FROM bookings WHERE booking_date >= CURRENT_DATE "
+                               + "ORDER BY booking_date ASC, time_slot ASC, booking_id ASC";
+                try (PreparedStatement stmt = conn.prepareStatement(bookSql);
+                     ResultSet rs = stmt.executeQuery()) {
+                    while (rs.next()) {
+                        upcomingBookings.add(new String[]{
+                            String.valueOf(rs.getInt("booking_id")),
+                            rs.getString("venue_name"),
+                            rs.getString("equipment_needed"),
+                            String.valueOf(rs.getDate("booking_date")),
+                            rs.getString("time_slot"),
+                            rs.getString("purpose"),
+                            rs.getString("booked_by")
+                        });
+                    }
+                }
+
+                // Distinct venues previously booked for quick autocomplete
+                try (PreparedStatement vStmt = conn.prepareStatement("SELECT DISTINCT UPPER(venue_name) AS v FROM bookings ORDER BY v ASC");
+                     ResultSet vRs = vStmt.executeQuery()) {
+                    while (vRs.next()) {
+                        knownVenues.add(vRs.getString("v"));
+                    }
+                }
+
+                // Pull available inventory items as equipment suggestions
+                try (PreparedStatement eStmt = conn.prepareStatement("SELECT product_id, product_name, stock FROM inventory WHERE stock > 0 ORDER BY product_name ASC");
+                     ResultSet eRs = eStmt.executeQuery()) {
+                    while (eRs.next()) {
+                        equipmentOptions.add(eRs.getString("product_name") + " (" + eRs.getString("product_id") + " - " + eRs.getInt("stock") + " avail)");
+                    }
+                }
+
+            } catch (Exception e) {
+                e.printStackTrace();
+                request.setAttribute("bookingError", "Booking load error: " + e.getMessage());
+            }
+
+            request.setAttribute("upcomingBookings", upcomingBookings);
+            request.setAttribute("knownVenues", knownVenues);
+            request.setAttribute("equipmentOptions", equipmentOptions);
+        }
+
+        // 4. Inventory & Booking Summary Tab
         if ("summary".equals(tab)) {
             int totalProducts = 0;
             int totalUnits = 0;
@@ -146,7 +198,6 @@ public class DashboardServlet extends HttpServlet {
 
             try (Connection conn = DBUtil.getConnection()) {
 
-                // Overall Inventory KPI + Total Worth
                 String kpiSql = "SELECT COUNT(*) AS prod_cnt, COALESCE(SUM(stock), 0) AS unit_sum, "
                               + "COALESCE(SUM(stock * unit_price), 0) AS total_worth, "
                               + "SUM(CASE WHEN stock <= low_threshold AND stock > 0 THEN 1 ELSE 0 END) AS low_cnt, "
@@ -162,7 +213,6 @@ public class DashboardServlet extends HttpServlet {
                     }
                 }
 
-                // Total Monetary Worth IN vs OUT from Stock Logs
                 String flowSql = "SELECT "
                                + "COALESCE(SUM(CASE WHEN action_type IN ('INITIAL STOCK', 'STOCK IN (MERGE)', 'STOCK IN (CART)', 'MANUAL IN', 'SCAN DISCREPANCY FIX', 'CART UNDO (OUT)') THEN total_value ELSE 0 END), 0) AS worth_in, "
                                + "COALESCE(SUM(CASE WHEN action_type IN ('STOCK OUT (CART)', 'MANUAL OUT', 'REMOVED PRODUCT', 'CART UNDO (IN)') THEN total_value ELSE 0 END), 0) AS worth_out "
@@ -175,7 +225,6 @@ public class DashboardServlet extends HttpServlet {
                     }
                 }
 
-                // Category breakdown with Category Worth
                 String catSumSql = "SELECT UPPER(category) AS cat, COUNT(*) AS item_cnt, SUM(stock) AS total_qty, "
                                  + "COALESCE(SUM(stock * unit_price), 0) AS cat_worth "
                                  + "FROM inventory GROUP BY UPPER(category) ORDER BY cat_worth DESC";
@@ -191,7 +240,6 @@ public class DashboardServlet extends HttpServlet {
                     }
                 }
 
-                // Recent stock movement logs with unit price & total value
                 String logSql = "SELECT product_id, product_name, action_type, qty_changed, unit_price, total_value, resulting_stock, performed_by, created_at "
                               + "FROM stock_logs ORDER BY log_id DESC FETCH FIRST 30 ROWS ONLY";
                 try (PreparedStatement logStmt = conn.prepareStatement(logSql);

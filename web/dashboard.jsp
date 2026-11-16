@@ -1,3 +1,4 @@
+<%@page import="java.time.LocalDate"%>
 <%@page import="java.util.List"%>
 <%@page contentType="text/html" pageEncoding="UTF-8"%>
 <%
@@ -15,6 +16,7 @@
     if (activeTab == null) {
         activeTab = "home";
     }
+    String todayStr = LocalDate.now().toString();
 %>
 <!DOCTYPE html>
 <html>
@@ -183,6 +185,9 @@
         .card.purple-card {
             border-top-color: #805ad5;
         }
+        .card.teal-card {
+            border-top-color: #319795;
+        }
         .card h2 {
             font-size: 19px;
             color: #1a202c;
@@ -216,6 +221,13 @@
             display: grid;
             grid-template-columns: 2fr 1.2fr 1fr auto;
             gap: 12px;
+            align-items: end;
+            margin-top: 16px;
+        }
+        .book-form-grid {
+            display: grid;
+            grid-template-columns: 1.4fr 1.6fr 1.1fr 1.3fr 1.4fr auto;
+            gap: 10px;
             align-items: end;
             margin-top: 16px;
         }
@@ -287,7 +299,7 @@
             border-radius: 6px;
             margin-bottom: 18px;
             font-size: 14px;
-            font-weight: 500;
+            font-weight: 600;
         }
         .alert-success {
             background-color: #c6f6d5;
@@ -369,6 +381,16 @@
             background-color: #ebf8ff;
             color: #2b6cb0;
         }
+        .venue-badge {
+            display: inline-block;
+            padding: 3px 9px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 700;
+            background-color: #e6fffa;
+            color: #234e52;
+            border: 1px solid #b2f5ea;
+        }
         .status-badge {
             display: inline-block;
             padding: 3px 8px;
@@ -440,8 +462,13 @@
                 </a>
             </li>
             <li>
+                <a href="DashboardServlet?tab=bookings" class="<%= "bookings".equals(activeTab) ? "active" : "" %>">
+                    Venue &amp; Equipment
+                </a>
+            </li>
+            <li>
                 <a href="DashboardServlet?tab=summary" class="<%= "summary".equals(activeTab) ? "active" : "" %>">
-                    Inventory Summary
+                    Summary &amp; Schedule
                 </a>
             </li>
             <li>
@@ -473,8 +500,10 @@
                     Manage Inventory
                 <% } else if ("adjustment".equals(activeTab)) { %>
                     Stock Adjustment (Cart)
+                <% } else if ("bookings".equals(activeTab)) { %>
+                    Venue &amp; Equipment Booking
                 <% } else if ("summary".equals(activeTab)) { %>
-                    Inventory Summary &amp; Valuation
+                    Inventory Valuation &amp; Upcoming Bookings
                 <% } else if ("users".equals(activeTab)) { %>
                     User Access Management
                 <% } else if ("profile".equals(activeTab)) { %>
@@ -498,7 +527,7 @@
                 String selectedSort = (String) request.getAttribute("selectedSort");
                 String invError = (String) request.getAttribute("invError");
             %>
-                <!-- 1. Add New Product Card (With Product ID & Unit Price) -->
+                <!-- 1. Add New Product Card -->
                 <div class="card">
                     <h2>Add Product to Inventory</h2>
                     <p class="subtext">Enter a unique Product ID, required Category (in CAPS), unit price, initial stock, and low-stock threshold.</p>
@@ -691,7 +720,6 @@
                     </div>
                 <% } %>
 
-                <!-- 1. Scan / Enter Product ID Card -->
                 <div class="card">
                     <h2>Stock In / Stock Out Scanner</h2>
                     <p class="subtext">
@@ -731,7 +759,6 @@
                     </form>
                 </div>
 
-                <!-- 2. Personal Adjustment Cart -->
                 <div class="card admin-card">
                     <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
                         <div>
@@ -790,6 +817,149 @@
                     <% } %>
                 </div>
 
+            <% } else if ("bookings".equals(activeTab)) {
+                List<String[]> upcomingBookings = (List<String[]>) request.getAttribute("upcomingBookings");
+                List<String> knownVenues = (List<String>) request.getAttribute("knownVenues");
+                List<String> equipmentOptions = (List<String>) request.getAttribute("equipmentOptions");
+                String bookingError = (String) request.getAttribute("bookingError");
+                String bookingMessage = (String) session.getAttribute("bookingMessage");
+                String bookingMsgType = (String) session.getAttribute("bookingMsgType");
+                if (bookingMessage != null) {
+                    session.removeAttribute("bookingMessage");
+                    session.removeAttribute("bookingMsgType");
+                }
+            %>
+                <% if (bookingMessage != null) { %>
+                    <div class="alert-box <%= "error".equals(bookingMsgType) ? "alert-error" : "alert-success" %>">
+                        <%= bookingMessage %>
+                    </div>
+                <% } %>
+
+                <!-- 1. Book Venue & Equipment Card -->
+                <div class="card teal-card">
+                    <h2>Book Venue &amp; Equipment</h2>
+                    <p class="subtext">Select a venue, equipment needed, date, and time slot. Double-booking the same venue, date, and time slot is automatically blocked.</p>
+
+                    <form action="BookingServlet" method="POST" class="book-form-grid">
+                        <input type="hidden" name="action" value="book">
+                        <input type="hidden" name="returnTab" value="bookings">
+
+                        <div class="field-box">
+                            <label for="venueName">Venue / Place *</label>
+                            <input type="text" id="venueName" name="venueName" list="venueSuggestions"
+                                   placeholder="e.g. MAIN HALL, ROOM A" style="text-transform: uppercase;" required>
+                            <datalist id="venueSuggestions">
+                                <option value="MAIN HALL">
+                                <option value="CONFERENCE ROOM A">
+                                <option value="TRAINING LAB 1">
+                                <option value="AUDITORIUM">
+                                <% if (knownVenues != null) {
+                                    for (String v : knownVenues) { %>
+                                        <option value="<%= v %>">
+                                <%  }
+                                } %>
+                            </datalist>
+                        </div>
+
+                        <div class="field-box">
+                            <label for="equipmentNeeded">Equipment Needed</label>
+                            <input type="text" id="equipmentNeeded" name="equipmentNeeded" list="equipmentSuggestions"
+                                   placeholder="e.g. Projector, 2x Mics">
+                            <datalist id="equipmentSuggestions">
+                                <% if (equipmentOptions != null) {
+                                    for (String eq : equipmentOptions) { %>
+                                        <option value="<%= eq %>">
+                                <%  }
+                                } %>
+                            </datalist>
+                        </div>
+
+                        <div class="field-box">
+                            <label for="bookingDate">Date *</label>
+                            <input type="date" id="bookingDate" name="bookingDate" min="<%= todayStr %>" value="<%= todayStr %>" required>
+                        </div>
+
+                        <div class="field-box">
+                            <label for="timeSlot">Time Slot *</label>
+                            <select id="timeSlot" name="timeSlot" required>
+                                <option value="08:00 AM - 10:00 AM">08:00 AM - 10:00 AM</option>
+                                <option value="10:00 AM - 12:00 PM">10:00 AM - 12:00 PM</option>
+                                <option value="01:00 PM - 03:00 PM">01:00 PM - 03:00 PM</option>
+                                <option value="03:00 PM - 05:00 PM">03:00 PM - 05:00 PM</option>
+                                <option value="05:00 PM - 07:00 PM">05:00 PM - 07:00 PM</option>
+                                <option value="FULL DAY (08:00 AM - 05:00 PM)">FULL DAY (08:00 AM - 05:00 PM)</option>
+                            </select>
+                        </div>
+
+                        <div class="field-box">
+                            <label for="purpose">Event / Purpose</label>
+                            <input type="text" id="purpose" name="purpose" placeholder="e.g. Weekly Briefing">
+                        </div>
+
+                        <button type="submit" class="btn-primary">+ Confirm Booking</button>
+                    </form>
+                </div>
+
+                <!-- 2. Active Upcoming Bookings Table -->
+                <div class="card">
+                    <h2>Upcoming Venue &amp; Equipment Bookings</h2>
+                    <p class="subtext">All confirmed reservations from today onward. Occupied slots cannot be booked again until cancelled.</p>
+
+                    <% if (bookingError != null) { %>
+                        <p style="color: #c53030; margin-top: 12px;"><%= bookingError %></p>
+                    <% } else if (upcomingBookings != null && !upcomingBookings.isEmpty()) { %>
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Date</th>
+                                    <th>Time Slot</th>
+                                    <th>Venue / Place</th>
+                                    <th>Equipment</th>
+                                    <th>Purpose</th>
+                                    <th>Booked By</th>
+                                    <th>Action</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <% for (String[] b : upcomingBookings) {
+                                    String bId = b[0];
+                                    String bVenue = b[1];
+                                    String bEquip = b[2];
+                                    String bDate = b[3];
+                                    String bSlot = b[4];
+                                    String bPurpose = b[5];
+                                    String bUser = b[6];
+                                    boolean canCancel = isAdmin || currentUser.equals(bUser);
+                                %>
+                                <tr>
+                                    <td><strong><%= bDate %></strong></td>
+                                    <td><span class="pid-code"><%= bSlot %></span></td>
+                                    <td><span class="venue-badge"><%= bVenue %></span></td>
+                                    <td><%= bEquip %></td>
+                                    <td class="subtext"><%= bPurpose %></td>
+                                    <td><strong><%= bUser %></strong></td>
+                                    <td>
+                                        <% if (canCancel) { %>
+                                            <form action="BookingServlet" method="POST" style="margin: 0;"
+                                                  onsubmit="return confirm('Cancel booking for <%= bVenue %> on <%= bDate %> (<%= bSlot %>)?');">
+                                                <input type="hidden" name="action" value="cancel">
+                                                <input type="hidden" name="bookingId" value="<%= bId %>">
+                                                <input type="hidden" name="returnTab" value="bookings">
+                                                <button type="submit" class="btn-danger">Cancel</button>
+                                            </form>
+                                        <% } else { %>
+                                            <span class="protected-text">Occupied</span>
+                                        <% } %>
+                                    </td>
+                                </tr>
+                                <% } %>
+                            </tbody>
+                        </table>
+                    <% } else { %>
+                        <p class="subtext" style="margin-top: 16px;">No upcoming bookings scheduled. Use the form above to reserve a venue.</p>
+                    <% } %>
+                </div>
+
             <% } else if ("summary".equals(activeTab)) {
                 Integer totalProducts = (Integer) request.getAttribute("totalProducts");
                 Integer totalUnits = (Integer) request.getAttribute("totalUnits");
@@ -800,6 +970,7 @@
                 String totalWorthOut = (String) request.getAttribute("totalWorthOut");
                 List<String[]> categorySummary = (List<String[]>) request.getAttribute("categorySummary");
                 List<String[]> stockLogs = (List<String[]>) request.getAttribute("stockLogs");
+                List<String[]> upcomingBookings = (List<String[]>) request.getAttribute("upcomingBookings");
                 String summaryError = (String) request.getAttribute("summaryError");
             %>
                 <% if (summaryError != null) { %>
@@ -842,14 +1013,56 @@
                         <div class="kpi-number" style="color: #dd6b20;"><%= lowStockCount != null ? lowStockCount : 0 %></div>
                         <p class="subtext">At or below threshold</p>
                     </div>
-                    <div class="card danger-card">
-                        <span class="subtext">Out of Stock</span>
-                        <div class="kpi-number" style="color: #e53e3e;"><%= outOfStockCount != null ? outOfStockCount : 0 %></div>
-                        <p class="subtext">Items currently at 0</p>
+                    <div class="card teal-card">
+                        <span class="subtext">Upcoming Bookings</span>
+                        <div class="kpi-number" style="color: #285e61;"><%= upcomingBookings != null ? upcomingBookings.size() : 0 %></div>
+                        <p class="subtext">Scheduled venue reservations</p>
                     </div>
                 </div>
 
-                <!-- 3. Stock & Worth Summary by Category -->
+                <!-- 3. Upcoming Venue & Equipment Bookings Tracker -->
+                <div class="card teal-card">
+                    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+                        <div>
+                            <h2>Upcoming Venue &amp; Equipment Bookings</h2>
+                            <p class="subtext">Keep track of scheduled rooms, equipment, dates, and time slots.</p>
+                        </div>
+                        <a href="DashboardServlet?tab=bookings" class="btn-primary" style="text-decoration: none; font-size: 13px; padding: 8px 14px;">
+                            + New Booking
+                        </a>
+                    </div>
+
+                    <% if (upcomingBookings != null && !upcomingBookings.isEmpty()) { %>
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Date</th>
+                                    <th>Time Slot</th>
+                                    <th>Venue / Place</th>
+                                    <th>Equipment</th>
+                                    <th>Purpose</th>
+                                    <th>Booked By</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <% for (String[] b : upcomingBookings) { %>
+                                <tr>
+                                    <td><strong><%= b[3] %></strong></td>
+                                    <td><span class="pid-code"><%= b[4] %></span></td>
+                                    <td><span class="venue-badge"><%= b[1] %></span></td>
+                                    <td><%= b[2] %></td>
+                                    <td class="subtext"><%= b[5] %></td>
+                                    <td><strong><%= b[6] %></strong></td>
+                                </tr>
+                                <% } %>
+                            </tbody>
+                        </table>
+                    <% } else { %>
+                        <p class="subtext" style="margin-top: 12px;">No upcoming bookings scheduled.</p>
+                    <% } %>
+                </div>
+
+                <!-- 4. Stock & Worth Summary by Category -->
                 <div class="card">
                     <h2>Stock &amp; Valuation Summary by Category</h2>
                     <p class="subtext">Breakdown of products, total stock units, and total monetary worth per category.</p>
@@ -880,7 +1093,7 @@
                     <% } %>
                 </div>
 
-                <!-- 4. Stock Movement & Value Tracking Log -->
+                <!-- 5. Stock Movement & Value Tracking Log -->
                 <div class="card">
                     <h2>Recent Stock Movement &amp; Value Log</h2>
                     <p class="subtext">Tracks every Stock In, Stock Out, Manual Update, and Scan Discrepancy Fix along with unit price and total value.</p>
@@ -1005,9 +1218,13 @@
                         <h3>Stock Adjustment</h3>
                         <p class="subtext">Scan Product IDs to Stock In or Stock Out with automatic live deduction and value tracking.</p>
                     </div>
+                    <div class="card teal-card">
+                        <h3>Venue &amp; Equipment</h3>
+                        <p class="subtext">Reserve venues and equipment with automatic conflict detection when a venue is occupied.</p>
+                    </div>
                     <div class="card purple-card">
-                        <h3>Inventory Summary</h3>
-                        <p class="subtext">View whole inventory worth, total worth in vs out, category valuations, and audit logs.</p>
+                        <h3>Summary &amp; Schedule</h3>
+                        <p class="subtext">View whole inventory worth, worth in vs out, and track all upcoming venue bookings.</p>
                     </div>
                 </div>
             <% } %>
